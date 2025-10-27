@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from typing import Any, Optional
 
@@ -38,6 +39,7 @@ if USE_LANGFUSE:
     litellm.failure_callback = ["langfuse"]
 
 litellm.drop_params = True
+XAI_API_BASE = os.environ.get("XAI_API_BASE", "https://api.x.ai/v1")
 
 if LLM_CACHE_ENABLED:
     if DEFAULT_LLM_CACHE_TYPE == "redis":
@@ -205,6 +207,16 @@ def generate(
     tools = [tool.openai_schema for tool in tools] if tools else None
     if tools and tool_choice is None:
         tool_choice = "auto"
+    if model.startswith("grok-"):
+        kwargs.setdefault("custom_llm_provider", "xai")
+        kwargs.setdefault("api_base", XAI_API_BASE)
+        if kwargs.get("api_key") is None:
+            xai_api_key = os.environ.get("XAI_API_KEY")
+            if xai_api_key is None:
+                raise RuntimeError(
+                    "XAI_API_KEY is required to call Grok models. Please set it in your environment."
+                )
+            kwargs["api_key"] = xai_api_key
     try:
         response = completion(
             model=model,

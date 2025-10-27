@@ -1,3 +1,6 @@
+import os
+
+
 # SIMULATION
 DEFAULT_MAX_STEPS = 200
 DEFAULT_MAX_ERRORS = 10
@@ -17,7 +20,18 @@ DEFAULT_LLM_TEMPERATURE_USER = 0.0
 DEFAULT_LLM_ARGS_AGENT = {"temperature": DEFAULT_LLM_TEMPERATURE_AGENT}
 DEFAULT_LLM_ARGS_USER = {"temperature": DEFAULT_LLM_TEMPERATURE_USER}
 
-DEFAULT_LLM_NL_ASSERTIONS = "gpt-4o-mini"
+def _resolve_nl_assertions_model() -> str:
+    override = os.environ.get("TAU2_LLM_NL_ASSERTIONS")
+    if override:
+        return override
+    if os.environ.get("OPENAI_API_KEY"):
+        return "gpt-4o-mini"
+    if os.environ.get("XAI_API_KEY"):
+        return os.environ.get("TAU2_XAI_NL_ASSERTIONS_MODEL", "grok-4-fast-reasoning")
+    return "gpt-4o-mini"
+
+
+DEFAULT_LLM_NL_ASSERTIONS = _resolve_nl_assertions_model()
 DEFAULT_LLM_NL_ASSERTIONS_TEMPERATURE = 0.0
 DEFAULT_LLM_NL_ASSERTIONS_ARGS = {"temperature": DEFAULT_LLM_NL_ASSERTIONS_TEMPERATURE}
 
