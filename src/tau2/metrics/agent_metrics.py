@@ -1,5 +1,6 @@
 import math
 import re
+from typing import Optional
 
 import pandas as pd
 from loguru import logger
@@ -19,6 +20,7 @@ class AgentMetrics(BaseModel):
     avg_reward: float
     pass_hat_ks: dict[int, float]
     avg_agent_cost: float
+    avg_process_score: Optional[float] = None
 
     def as_dict(self) -> dict:
         data = {
@@ -116,15 +118,31 @@ def compute_metrics(results: Results) -> AgentMetrics:
             k = int(match.group(1))
             pass_hat_ks[k] = df_pass_hat_k[column].mean()
     avg_agent_cost = df.agent_cost.mean()
+    process_scores: list[float] = []
+    for simulation in results.simulations:
+        if simulation.reward_info and simulation.reward_info.info:
+            proc_metrics = simulation.reward_info.info.get("process_metrics")
+            if isinstance(proc_metrics, dict):
+                proc_score = proc_metrics.get("ProcessScoreNorm")
+                if isinstance(proc_score, (int, float)):
+                    process_scores.append(float(proc_score))
+
+    avg_process_score = (
+        sum(process_scores) / len(process_scores) if process_scores else None
+    )
+
     return AgentMetrics(
         avg_reward=avg_reward,
         pass_hat_ks=pass_hat_ks,
         avg_agent_cost=avg_agent_cost,
+        avg_process_score=avg_process_score,
     )
 
 
 def display_metrics(metrics: AgentMetrics) -> None:
     print(f"🏆 Average reward: {metrics.avg_reward}")
+    if metrics.avg_process_score is not None:
+        print(f"🧩 Average process-aware score: {metrics.avg_process_score}")
     print("📈 Pass^k")
     for k, pass_hat_k in metrics.pass_hat_ks.items():
         print(f"  k={k}: {pass_hat_k}")

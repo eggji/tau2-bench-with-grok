@@ -15,7 +15,7 @@ from tau2.config import (
     DEFAULT_SEED,
     DEFAULT_USER_IMPLEMENTATION,
 )
-from tau2.data_model.simulation import RunConfig
+from tau2.data_model.simulation import EvaluationType, RunConfig
 from tau2.run import get_options, run_domain
 
 
@@ -128,6 +128,49 @@ def add_run_args(parser):
         default=DEFAULT_LOG_LEVEL,
         help=f"The log level to use for the simulation. Default is {DEFAULT_LOG_LEVEL}.",
     )
+    parser.add_argument(
+        "--evaluation-type",
+        type=str,
+        choices=[etype.value for etype in EvaluationType],
+        default=EvaluationType.ALL.value,
+        help="Evaluation strategy for scoring (e.g., 'all', 'process').",
+    )
+    parser.add_argument(
+        "--robustness-k",
+        type=int,
+        default=0,
+        help="Generate this many user variants per task (0 disables robustness mode).",
+    )
+    parser.add_argument(
+        "--robustness-seed",
+        type=int,
+        default=123,
+        help="Seed controlling robustness variant generation.",
+    )
+    parser.add_argument(
+        "--robustness-paraphrase-prob",
+        type=float,
+        default=0.5,
+        help="Probability of paraphrasing tokens within user turns.",
+    )
+    parser.add_argument(
+        "--robustness-ambiguity-prob",
+        type=float,
+        default=0.3,
+        help="Probability of replacing fields with ambiguous mentions.",
+    )
+    parser.add_argument(
+        "--robustness-smalltalk-prob",
+        type=float,
+        default=0.3,
+        help="Chance of injecting a small-talk user turn.",
+    )
+    parser.add_argument(
+        "--robustness-goal-change-prob",
+        type=float,
+        default=0.2,
+        help="Chance of inserting a soft goal-change utterance.",
+    )
 
 
 def main():
@@ -157,6 +200,13 @@ def main():
                 max_concurrency=args.max_concurrency,
                 seed=args.seed,
                 log_level=args.log_level,
+                evaluation_type=args.evaluation_type,
+                robustness_k=args.robustness_k,
+                robustness_seed=args.robustness_seed,
+                robustness_paraphrase_prob=args.robustness_paraphrase_prob,
+                robustness_ambiguity_prob=args.robustness_ambiguity_prob,
+                robustness_smalltalk_prob=args.robustness_smalltalk_prob,
+                robustness_goal_change_prob=args.robustness_goal_change_prob,
             )
         )
     )

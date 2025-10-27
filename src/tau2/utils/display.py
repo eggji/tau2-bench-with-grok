@@ -69,7 +69,8 @@ class ConsoleDisplay:
 
         settings_content = Panel(
             f"[white]Save To:[/] {config.save_to or 'Not specified'}\n"
-            f"[white]Max Concurrency:[/] {config.max_concurrency}",
+            f"[white]Max Concurrency:[/] {config.max_concurrency}\n"
+            f"[white]Evaluation Type:[/] {config.evaluation_type.value}",
             title="[bold cyan]Additional Settings",
             border_style="cyan",
         )
@@ -199,6 +200,12 @@ class ConsoleDisplay:
         if simulation.user_cost is not None:
             sim_info.append("User Cost: ", style="bold cyan")
             sim_info.append(f"${simulation.user_cost:.4f}\n")
+        process_metrics = None
+        if simulation.reward_info and simulation.reward_info.info:
+            raw_metrics = simulation.reward_info.info.get("process_metrics")
+            if isinstance(raw_metrics, dict):
+                process_metrics = raw_metrics
+
         if simulation.reward_info:
             marker = "✅" if is_successful(simulation.reward_info.reward) else "❌"
             sim_info.append("Reward: ", style="bold cyan")
@@ -215,6 +222,12 @@ class ConsoleDisplay:
             sim_info.append(
                 f"{marker} {simulation.reward_info.reward:.4f} ({', '.join(breakdown)})\n"
             )
+
+            if process_metrics and isinstance(
+                process_metrics.get("ProcessScoreNorm"), (int, float)
+            ):
+                sim_info.append("Process-Aware Score: ", style="bold cyan")
+                sim_info.append(f"{process_metrics['ProcessScoreNorm']:.3f}\n")
 
             # Add DB check info if present
             if simulation.reward_info.db_check:
@@ -236,8 +249,13 @@ class ConsoleDisplay:
                 sim_info.append("\nAction Checks:\n", style="bold magenta")
                 for i, check in enumerate(simulation.reward_info.action_checks):
                     sim_info.append(
-                        f"- {i}: {check.action.name} {'✅' if check.action_match else '❌'} {check.action_reward}\n"
+                        f"- {i}: {check.action.name} {'✅' if check.action_match else '❌'} {check.action_reward}"
                     )
+                    if check.semantic_match is not None:
+                        sim_info.append(
+                            f" (Semantic: {'✅' if check.semantic_match else '❌'}, Score: {check.semantic_score if check.semantic_score is not None else 0:.2f})"
+                        )
+                    sim_info.append("\n")
 
             # Add communication checks if present
             if simulation.reward_info.communicate_checks:
@@ -260,6 +278,15 @@ class ConsoleDisplay:
                 sim_info.append("\nAdditional Info:\n", style="bold magenta")
                 for key, value in simulation.reward_info.info.items():
                     sim_info.append(f"{key}: {value}\n")
+
+        if simulation.robustness:
+            sim_info.append("\nRobustness:\n", style="bold magenta")
+            sim_info.append(
+                f"k={simulation.robustness.get('k')} | stability@{simulation.robustness.get('k')}: {simulation.robustness.get('stability_at_k', 0):.2f} | success_rate: {simulation.robustness.get('success_rate', 0):.2f}\n"
+            )
+            sim_info.append(
+                f"vector: {simulation.robustness.get('success_vector', [])}\n"
+            )
 
         cls.console.print(
             Panel(sim_info, title="Simulation Overview", border_style="blue")
@@ -339,6 +366,10 @@ class ConsoleDisplay:
         # Add average reward section
         content.append("🏆 Average Reward: ", style="bold cyan")
         content.append(f"{metrics.avg_reward:.4f}\n\n")
+
+        if metrics.avg_process_score is not None:
+            content.append("🧩 Avg Process-Aware Score: ", style="bold cyan")
+            content.append(f"{metrics.avg_process_score:.4f}\n\n")
 
         # Add Pass^k metrics section
         content.append("📈 Pass^k Metrics:", style="bold cyan")

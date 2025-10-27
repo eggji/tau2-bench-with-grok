@@ -26,6 +26,17 @@ from tau2.environment.environment import EnvironmentInfo
 from tau2.utils.utils import get_now
 
 
+class EvaluationType(str, Enum):
+    ENV = "env"
+    COMMUNICATE = "communicate"
+    ACTION = "action"
+    ALL = "all"
+    NL_ASSERTIONS = "nl_assertions"  # WIP
+    ALL_WITH_NL_ASSERTIONS = "all_with_nl_assertions"  # WIP
+    PROCESS = "process"
+    SEMANTIC_ACTION = "semantic_action"
+
+
 class RunConfig(BaseModel):
     domain: Annotated[
         str,
@@ -153,6 +164,40 @@ class RunConfig(BaseModel):
             default=DEFAULT_LOG_LEVEL,
         ),
     ]
+    evaluation_type: Annotated[
+        EvaluationType,
+        Field(
+            description="The evaluation strategy to use for scoring",
+            default=EvaluationType.ALL,
+        ),
+    ]
+    robustness_k: Annotated[
+        int,
+        Field(
+            description="Number of user variants per task (0 disables robustness mode).",
+            default=0,
+        ),
+    ]
+    robustness_seed: Annotated[
+        int,
+        Field(description="Seed for robustness variant generation.", default=123),
+    ]
+    robustness_paraphrase_prob: Annotated[
+        float,
+        Field(description="Paraphrase probability per phrase.", default=0.5),
+    ]
+    robustness_ambiguity_prob: Annotated[
+        float,
+        Field(description="Ambiguity replacement probability.", default=0.3),
+    ]
+    robustness_smalltalk_prob: Annotated[
+        float,
+        Field(description="Chance of injecting small talk in dialogue.", default=0.3),
+    ]
+    robustness_goal_change_prob: Annotated[
+        float,
+        Field(description="Chance of injecting goal change snippets.", default=0.2),
+    ]
 
     def validate(self) -> None:
         """
@@ -198,6 +243,12 @@ class ActionCheck(BaseModel):
     action: Action
     action_match: bool
     action_reward: float
+    semantic_match: Optional[bool] = Field(
+        description="Whether the semantic comparison matched.", default=None
+    )
+    semantic_score: Optional[float] = Field(
+        description="Semantic soft score in [0,1]", default=None
+    )
 
 
 class EnvAssertionCheck(BaseModel):
@@ -338,6 +389,9 @@ class SimulationRun(BaseModel):
     trial: Optional[int] = Field(description="Trial number", default=None)
     seed: Optional[int] = Field(
         description="Seed used for the simulation.", default=None
+    )
+    robustness: Optional[dict] = Field(
+        description="Robustness evaluation report.", default=None
     )
 
 

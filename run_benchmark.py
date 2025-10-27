@@ -20,7 +20,7 @@ if SRC_DIR.exists():
     sys.path.insert(0, str(SRC_DIR))
 
 from tau2.cli import add_run_args  # type: ignore  # noqa: E402
-from tau2.data_model.simulation import RunConfig  # type: ignore  # noqa: E402
+from tau2.data_model.simulation import EvaluationType, RunConfig  # type: ignore  # noqa: E402
 from tau2.run import run_domain  # type: ignore  # noqa: E402
 
 DEFAULT_GROK_MODEL = os.environ.get("TAU2_GROK_MODEL", "grok-4-fast-reasoning")
@@ -48,6 +48,13 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--no-auto-grok",
         action="store_true",
         help="Disable automatic substitution of Grok model for agent/user.",
+    )
+    parser.add_argument(
+        "--evaluation-type",
+        type=str,
+        choices=[etype.value for etype in EvaluationType],
+        default=EvaluationType.ALL.value,
+        help="Evaluation strategy for scoring (default: all).",
     )
     return parser.parse_args(args=argv)
 
@@ -80,6 +87,13 @@ def build_run_config(args: argparse.Namespace) -> RunConfig:
         max_concurrency=args.max_concurrency,
         seed=args.seed,
         log_level=args.log_level,
+        evaluation_type=args.evaluation_type,
+        robustness_k=args.robustness_k,
+        robustness_seed=args.robustness_seed,
+        robustness_paraphrase_prob=args.robustness_paraphrase_prob,
+        robustness_ambiguity_prob=args.robustness_ambiguity_prob,
+        robustness_smalltalk_prob=args.robustness_smalltalk_prob,
+        robustness_goal_change_prob=args.robustness_goal_change_prob,
     )
 
 

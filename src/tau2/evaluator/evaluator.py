@@ -1,21 +1,16 @@
-from enum import Enum
-
-from tau2.data_model.simulation import RewardInfo, SimulationRun, TerminationReason
+from tau2.data_model.simulation import (
+    EvaluationType,
+    RewardInfo,
+    SimulationRun,
+    TerminationReason,
+)
 from tau2.data_model.tasks import RewardType, Task
-from tau2.evaluator.evaluator_action import ActionEvaluator
+from tau2.evaluator.evaluator_action import ActionEvaluator, SemanticActionEvaluator
 from tau2.evaluator.evaluator_communicate import CommunicateEvaluator
 from tau2.evaluator.evaluator_env import EnvironmentEvaluator
 from tau2.evaluator.evaluator_nl_assertions import NLAssertionsEvaluator
+from tau2.evaluator.evaluator_process import ProcessAwareEvaluator
 from tau2.registry import registry
-
-
-class EvaluationType(str, Enum):
-    ENV = "env"
-    COMMUNICATE = "communicate"
-    ACTION = "action"
-    ALL = "all"
-    NL_ASSERTIONS = "nl_assertions"  # WIP
-    ALL_WITH_NL_ASSERTIONS = "all_with_nl_assertions"  # WIP
 
 
 def evaluate_simulation(
@@ -64,6 +59,18 @@ def evaluate_simulation(
         reward_info = ActionEvaluator.calculate_reward(
             task=task,
             full_trajectory=simulation.messages,
+        )
+    elif evaluation_type == EvaluationType.SEMANTIC_ACTION:
+        reward_info = SemanticActionEvaluator.calculate_reward(
+            task=task,
+            full_trajectory=simulation.messages,
+        )
+    elif evaluation_type == EvaluationType.PROCESS:
+        reward_info = ProcessAwareEvaluator.calculate_reward(
+            environment_constructor=registry.get_env_constructor(domain),
+            task=task,
+            full_trajectory=simulation.messages,
+            solo_mode=solo_mode,
         )
     elif evaluation_type in {EvaluationType.ALL, EvaluationType.ALL_WITH_NL_ASSERTIONS}:
         env_reward_info = EnvironmentEvaluator.calculate_reward(

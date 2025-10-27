@@ -1,127 +1,58 @@
-# τ²-Bench: Grok Benchmarking Framework
+# Tau2 Grok Runner
 
-A streamlined version of τ²-bench focused on benchmarking conversational agents with Grok and other LLMs.
+`tau2-bench-with-grok` is a slimmed version of the Tau2 dual-control benchmark that ships with sane defaults for **xAI Grok** models. It lets you measure dialog agents on the airline, retail, and telecom task suites without hand-tuning the full Tau2 stack.
 
-## Overview
-
-This framework evaluates customer service agents across multiple domains:
-- **airline** - Flight reservation customer service
-- **retail** - E-commerce customer service  
-- **telecom** - Technical support scenarios
-- **mock** - Simple testing domain
-
-## Quick Start
-
-### Installation
+## Setup
 
 ```bash
-# Install dependencies
-pip install -e .
-
-# Or using UV
-uv sync
-```
-
-### Setup API Keys
-
-Copy `.env.example` to `.env` and add your API keys:
-
-```bash
+pip install -e .   # or `uv sync`
 cp .env.example .env
-# Edit .env with your API keys
 ```
 
-### Run Benchmark
+Populate `.env` with `XAI_API_KEY` (and optionally `OPENAI_API_KEY` if you compare against GPT baselines).
 
-**Using the standalone script (recommended for Grok integration):**
+## Running with Grok
+
+The helper script wires Grok into both the agent and user simulators. Run it once per domain or task subset:
 
 ```bash
 python run_benchmark.py \
   --domain airline \
-  --agent-llm gpt-4.1 \
-  --user-llm grok-4-fast-reasoning \
+  --grok-model grok-4-fast-reasoning \
   --num-trials 1 \
-  --num-tasks 5
+  --num-tasks 5 \
+  --evaluation-type process  # swap to `semantic_action` for relaxed matching
 ```
 
-**Using the CLI:**
+Behind the scenes this sets `--agent-llm` and `--user-llm` to the chosen Grok model unless you override them manually. Results land in `data/tau2/simulations/<timestamp>.json` and can be previewed via `tau2 view --file <path>`.
+
+## Key Improvements
+
+### Process-Aware Scoring
+
+- Tracks how well the agent followed the *procedure* rather than only the final DB equality.
+- Components: `StepReward`, `OrderReward`, `RedundancyPenalty`, `CausalPenalty`, normalized into `ProcessScoreNorm ∈ [0,1]`.
+- Enable it with `--evaluation-type process`. Each simulation prints a "Process-Aware Score" under the reward and we aggregate the average score in the metrics footer.
+
+### Semantic Argument Matching
+
+- Replaces brittle string equality with field-aware fuzzy matching (numeric tolerance, date parsing, ID similarity ≥ 0.9, synonym tables).
+- New evaluation mode `--evaluation-type semantic_action` annotates every action check with `(Semantic: ✅/❌, Score)` and drastically reduces false negatives such as `credit_card_01` vs `visa_card_01`.
+
+### Robustness Mode (User Variants)
+
+- Turn on rule-based user perturbations with `--robustness-k <N>` (plus optional `--robustness-*` probability knobs). The runner paraphrases, adds ambiguity, injects small talk, and proposes mild goal changes before launching extra simulations.
+- Each base task reports `robustness = {k, success_vector, success_rate, stability@k}` where `stability@k = 1 − Var(success)`; use it to spot language-sensitive agents or tasks. Per-task YAML overrides (`robustness: {k_variants:5, paraphrase_prob:0.6, ...}`) keep experiments reproducible.
+
+Together these upgrades make Grok benchmarking fairer *and* stress-tested: you can spot whether a failure came from poor planning (low ProcessScoreNorm), lexical mismatch (semantic scores), or brittle behavior under paraphrased users (low stability@k).
+
+## Handy CLI commands
 
 ```bash
-tau2 run \
-  --domain airline \
-  --agent-llm gpt-4.1 \
-  --user-llm grok-4-fast-reasoning \
-  --num-trials 1 \
-  --num-tasks 5
+tau2 run ...                 # full Tau2 runner (same flags as script)
+tau2 view --file <json>      # inspect a simulation file
+tau2 check-data              # verify domain assets exist
+tau2 domain <airline|...>    # print domain policy + tools
 ```
 
-## Available Commands
-
-### Run Benchmark
-```bash
-tau2 run \
-  --domain <domain> \
-  --agent-llm <llm_name> \
-  --user-llm <llm_name> \
-  --num-trials <trial_count> \
-  --num-tasks <task_count>
-```
-
-### View Results
-```bash
-tau2 view
-```
-
-### Check Data Configuration
-```bash
-tau2 check-data
-```
-
-### View Domain Documentation
-```bash
-tau2 domain <domain>
-```
-
-## Domains
-
-- **airline**: Flight booking, cancellations, seat changes
-- **retail**: Product orders, returns, customer support
-- **telecom**: Technical support, billing, service issues
-- **mock**: Simple arithmetic and basic operations
-
-## Results
-
-Results are saved in `data/tau2/simulations/` as JSON files containing:
-- Task execution trajectories
-- Success/failure metrics
-- Agent performance data
-
-## LLM Support
-
-Uses [LiteLLM](https://github.com/BerriAI/litellm) for LLM integration. Supports:
-- OpenAI (GPT-4, GPT-3.5)
-- Grok (grok-4-fast-reasoning, etc.)
-- Anthropic (Claude)
-- And many others
-
-## Configuration
-
-Key configuration options in `src/tau2/config.py`:
-- Default LLM models
-- Temperature settings
-- Max steps and errors
-- Concurrency limits
-
-## Citation
-
-```bibtex
-@misc{barres2025tau2,
-      title={$\tau^2$-Bench: Evaluating Conversational Agents in a Dual-Control Environment}, 
-      author={Victor Barres and Honghua Dong and Soham Ray and Xujie Si and Karthik Narasimhan},
-      year={2025},
-      eprint={2506.07982},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2506.07982}, 
-}
-```
+Happy benchmarking! Grok-specific issues? Set `TAU2_GROK_MODEL` or edit `run_benchmark.py` defaults and rerun.

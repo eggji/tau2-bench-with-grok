@@ -3,7 +3,7 @@ import multiprocessing
 import random
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -16,10 +16,11 @@ from tau2.data_model.simulation import (
     SimulationRun,
     UserInfo,
 )
-from tau2.data_model.tasks import Task
+from tau2.data_model.tasks import StructuredUserInstructions, Task
 from tau2.environment.environment import Environment, EnvironmentInfo
 from tau2.evaluator.evaluator import EvaluationType, evaluate_simulation
-from tau2.metrics.agent_metrics import compute_metrics
+from tau2.evaluator.robust_user_variants import evaluate_variants
+from tau2.metrics.agent_metrics import compute_metrics, is_successful
 from tau2.orchestrator.orchestrator import Orchestrator
 from tau2.registry import RegistryInfo, registry
 from tau2.user.user_simulator import DummyUser, get_global_user_sim_guidelines
@@ -78,6 +79,34 @@ def get_tasks(
     if num_tasks is not None:
         tasks = tasks[:num_tasks]
     return tasks
+
+
+def _get_instruction_text(task: Task) -> Optional[str]:
+    instructions = task.user_scenario.instructions
+    if isinstance(instructions, StructuredUserInstructions):
+        return instructions.task_instructions
+    if isinstance(instructions, str):
+        return instructions
+    return None
+
+
+def _set_instruction_text(task: Task, text: str) -> None:
+    instructions = task.user_scenario.instructions
+    if isinstance(instructions, StructuredUserInstructions):
+        instructions.task_instructions = text
+    else:
+        task.user_scenario.instructions = text
+
+
+def _seed_dialogue_from_task(task: Task) -> Optional[list[dict[str, str]]]:
+    seed_text = _get_instruction_text(task)
+    if not seed_text:
+        return None
+    return [{"role": "user", "content": seed_text}]
+
+
+def _dialogue_to_instruction_text(dialogue: list[dict[str, str]]) -> str:
+    return " ".join(turn.get("content", "") for turn in dialogue if turn.get("role") == "user").strip()
 
 
 def make_run_name(config: RunConfig) -> str:
@@ -142,10 +171,16 @@ def run_domain(config: RunConfig) -> Results:
         max_errors=config.max_errors,
         save_to=save_to,
         console_display=True,
-        evaluation_type=EvaluationType.ALL,
+        evaluation_type=config.evaluation_type,
         max_concurrency=config.max_concurrency,
         seed=config.seed,
         log_level=config.log_level,
+        robustness_k=config.robustness_k,
+        robustness_seed=config.robustness_seed,
+        robustness_paraphrase_prob=config.robustness_paraphrase_prob,
+        robustness_ambiguity_prob=config.robustness_ambiguity_prob,
+        robustness_smalltalk_prob=config.robustness_smalltalk_prob,
+        robustness_goal_change_prob=config.robustness_goal_change_prob,
     )
     metrics = compute_metrics(simulation_results)
     ConsoleDisplay.display_agent_metrics(metrics)
@@ -171,6 +206,12 @@ def run_tasks(
     max_concurrency: int = 1,
     seed: Optional[int] = 300,
     log_level: Optional[str] = "INFO",
+    robustness_k: int = 0,
+    robustness_seed: int = 123,
+    robustness_paraphrase_prob: float = 0.5,
+    robustness_ambiguity_prob: float = 0.3,
+    robustness_smalltalk_prob: float = 0.3,
+    robustness_goal_change_prob: float = 0.2,
 ) -> Results:
     """
     Runs tasks for a given domain.
@@ -192,6 +233,7 @@ def run_tasks(
         max_concurrency (int): The maximum number of concurrent simulations to run.
         seed (int): The seed to use for the simulation.
         log_level (str): The log level to use.
+        robustness_k (int): Number of user variants per task (0 disables robustness mode).
     Returns:
         The simulation results and the annotations (if llm_review is True).
     """
@@ -324,6 +366,15 @@ def run_tasks(
             with open(save_to, "w") as fp:
                 json.dump(ckpt, fp, indent=2)
 
+    robustness_defaults = {
+        "n_variants": robustness_k,
+        "seed": robustness_seed,
+        "paraphrase_prob": robustness_paraphrase_prob,
+        "ambiguity_prob": robustness_ambiguity_prob,
+        "smalltalk_prob": robustness_smalltalk_prob,
+        "goal_change_prob": robustness_goal_change_prob,
+    }
+
     def _run(task: Task, trial: int, seed: int, progress_str: str) -> SimulationRun:
         console_text = Text(
             text=f"{progress_str}. Running task {task.id}, trial {trial + 1}",
@@ -346,6 +397,23 @@ def run_tasks(
                 seed=seed,
             )
             simulation.trial = trial
+            if robustness_k > 0:
+                robustness_report = _maybe_run_robustness(
+                    task=task,
+                    defaults=robustness_defaults,
+                    domain=domain,
+                    agent=agent,
+                    user=user,
+                    llm_agent=llm_agent,
+                    llm_args_agent=llm_args_agent,
+                    llm_user=llm_user,
+                    llm_args_user=llm_args_user,
+                    max_steps=max_steps,
+                    max_errors=max_errors,
+                    evaluation_type=evaluation_type,
+                )
+                if robustness_report:
+                    simulation.robustness = robustness_report
             if console_display:
                 ConsoleDisplay.display_simulation(simulation, show_details=False)
             _save(simulation)
@@ -500,6 +568,88 @@ def run_task(
         f"FINISHED SIMULATION: Domain: {domain}, Task: {task.id}, Agent: {agent.__class__.__name__}, User: {user.__class__.__name__}. Reward: {reward_info.reward}"
     )
     return simulation
+
+
+def _build_task_robustness_params(
+    defaults: dict[str, Any], task: Task
+) -> dict[str, Any]:
+    params = defaults.copy()
+    if task.robustness:
+        mapping = {
+            "k": "n_variants",
+            "k_variants": "n_variants",
+            "seed": "seed",
+            "paraphrase_prob": "paraphrase_prob",
+            "ambiguity_prob": "ambiguity_prob",
+            "smalltalk_prob": "smalltalk_prob",
+            "goal_change_prob": "goal_change_prob",
+        }
+        for key, dest in mapping.items():
+            if key in task.robustness and task.robustness[key] is not None:
+                params[dest] = task.robustness[key]
+    return params
+
+
+def _maybe_run_robustness(
+    task: Task,
+    defaults: dict[str, Any],
+    domain: str,
+    agent: str,
+    user: str,
+    llm_agent: Optional[str],
+    llm_args_agent: Optional[dict],
+    llm_user: Optional[str],
+    llm_args_user: Optional[dict],
+    max_steps: int,
+    max_errors: int,
+    evaluation_type: EvaluationType,
+) -> Optional[dict[str, Any]]:
+    params = _build_task_robustness_params(defaults, task)
+    if params.get("n_variants", 0) <= 0:
+        return None
+    seed_dialogue = _seed_dialogue_from_task(task)
+    if not seed_dialogue:
+        return None
+
+    counter = {"value": 0}
+
+    def run_agent_fn(dialogue):
+        instruction_text = _dialogue_to_instruction_text(dialogue)
+        if not instruction_text:
+            return {"success": 0}
+        variant_task = task.model_copy(deep=True)
+        _set_instruction_text(variant_task, instruction_text)
+        idx = counter["value"]
+        counter["value"] += 1
+        variant_seed = params["seed"] + idx + 1
+        variant_sim = run_task(
+            domain=domain,
+            task=variant_task,
+            agent=agent,
+            user=user,
+            llm_agent=llm_agent,
+            llm_args_agent=llm_args_agent,
+            llm_user=llm_user,
+            llm_args_user=llm_args_user,
+            max_steps=max_steps,
+            max_errors=max_errors,
+            evaluation_type=evaluation_type,
+            seed=variant_seed,
+        )
+        reward = variant_sim.reward_info.reward if variant_sim.reward_info else 0.0
+        return {"success": int(is_successful(reward))}
+
+    report = evaluate_variants(
+        seed_dialogue=seed_dialogue,
+        run_agent_fn=run_agent_fn,
+        n_variants=params["n_variants"],
+        seed=params["seed"],
+        paraphrase_prob=params.get("paraphrase_prob", 0.5),
+        ambiguity_prob=params.get("ambiguity_prob", 0.3),
+        smalltalk_prob=params.get("smalltalk_prob", 0.3),
+        goal_change_prob=params.get("goal_change_prob", 0.2),
+    )
+    return report
 
 
 def get_info(

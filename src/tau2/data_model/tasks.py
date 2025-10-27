@@ -4,7 +4,7 @@ import json
 import textwrap
 import uuid
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 from typing_extensions import Annotated
@@ -433,6 +433,13 @@ class Task(BaseModel):
         Optional[EvaluationCriteria],
         Field(
             description="Evaluation criteria for the task. This will be sent to the evaluator.",
+            default=None,
+        ),
+    ]
+    robustness: Annotated[
+        Optional[dict[str, Any]],
+        Field(
+            description="Optional robustness configuration (k, seed, probs).",
             default=None,
         ),
     ]
